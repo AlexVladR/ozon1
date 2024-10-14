@@ -10,7 +10,7 @@ attempt_numb=max(1,int(os.environ['attempt_numb']))
 url_dog="https://dog.ceo/api/breed"
 headers = {'Content-Type': 'application/json', 'Accept': 'application/json', 'Authorization': f'OAuth {xtoken}'}
 folder='test_folder'
-allBreeds=list(requests.get(f'https://dog.ceo/api/breeds/list/all').json()["message"].keys())
+#allBreeds=list(requests.get(f'https://dog.ceo/api/breeds/list/all').json()["message"].keys())
 class YaUploader:
     def __init__(self):
         pass
