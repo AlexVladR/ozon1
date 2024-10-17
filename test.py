@@ -1,5 +1,4 @@
 import os
-import random
 import time
 import pytest
 import requests
@@ -7,10 +6,9 @@ import requests
 url_r = 'https://cloud-api.yandex.net/v1/disk/resources'
 xtoken=os.environ['token']
 attempt_numb=max(1,int(os.environ['attempt_numb']))
-url_dog="https://dog.ceo/api/breed"
 headers = {'Content-Type': 'application/json', 'Accept': 'application/json', 'Authorization': f'OAuth {xtoken}'}
 folder='test_folder'
-#allBreeds=list(requests.get(f'https://dog.ceo/api/breeds/list/all').json()["message"].keys())
+
 class YaUploader:
     def __init__(self):
         pass
@@ -36,10 +34,9 @@ class YaUploader:
             }
 
     def check_folder(self, path):
-        res=None
         try:
-            res=requests.get(f'{url_r}?path={path}', headers = headers)
-            x1=checkResponse(res)
+            xparams = {"path": path}
+            res=requests.get(f'{url_r}',params=xparams,headers = headers)
             return checkResponse(res)
         except Exception as err:
             return {
@@ -47,11 +44,9 @@ class YaUploader:
                     'error': str(err)
             }
     def delete_folder(self, path):
-        res=None
-        xparams={"path":path,"permanently":True} #,"force_async":True}
+        xparams={"path":path,"permanently":False} #,"force_async":True}
         try:
             res=requests.delete(f'{url_r}', params=xparams,headers = headers)
-            x2 = checkResponse(res)
             return checkResponse(res)
         except Exception as err:
             return {
@@ -59,12 +54,17 @@ class YaUploader:
                     'error': str(err)
             }
     def lazy_delete_folder(self, path):
-        res=self.check_folder(path)
-        while res.get('statusCode')<300:
-            self.delete_folder(path)
-            time.sleep(1)
-            res = self.check_folder(path)
-        return {'isSuccess': True, 'text': f"Ресурс {path} удален"}
+        x=path
+        res1=self.check_folder(path)
+        if not 'statusCode'in res1:
+           return {'isSuccess': False, 'error': f"Error. lazy_delete_folder\ncheck_folder\n{str(res1['error'])}\n"}
+        while res1['statusCode'] < 300:
+            res=self.delete_folder(path)
+            if not 'statusCode' in res:
+                return {'isSuccess': False, 'error': f"Error. lazy_delete_folder\ndelete_folder\n{str(res['error'])}\n"}
+            res1 = self.check_folder(path)
+        return {'isSuccess': True}
+
     def upload_photos_to_yd(self, path, url_file, name):
         xres = {'isSuccess': False}
         url = f"{url_r}/upload"
@@ -95,9 +95,15 @@ class YaUploader:
                 break
         return xres
 class Dog:
+    def __init__(self):
+        pass
+    url_dogs = "https://dog.ceo/api/breeds"
+    url_dog = "https://dog.ceo/api/breed"
+    point="images/random"
+    allBreeds = list(requests.get(f'{url_dogs}/list/all').json()["message"].keys())
     def get_sub_breeds(self,breed):
         try:
-            res = requests.get(f'{url_dog}/{breed}/list')
+            res = requests.get(f'{self.url_dog}/{breed}/list')
             return checkResponse(res)
         except Exception as err:
             return {'isSuccess': False, 'error': str(err)}
@@ -107,17 +113,17 @@ class Dog:
         if sub_breeds:
             for sub_breed in sub_breeds:
                 try:
-                    res1 = requests.get(f"{url_dog}/{breed}/{sub_breed}/images/random")
+                    res1 = requests.get(f"{self.url_dog}/{breed}/{sub_breed}/{self.point}")
                     sub_breed_urls = res1.json().get('message')
                     url_images.append(sub_breed_urls)
                 except Exception as err:
-                    xstr += f"Error.\n{url_dog}/{breed}/{sub_breed}/images/random.\nКод ={res1.get('statusCode')}.\n{str(err)}."
+                    xstr += f"Error.\n{self.url_dog}/{breed}/{sub_breed}/{self.point}.\nКод ={res1.get('statusCode')}.\n{str(err)}."
         else:
             try:
-                res1=requests.get(f"{url_dog}/{breed}/images/random")
+                res1=requests.get(f"{self.url_dog}/{breed}/{self.point}")
                 url_images.append(res1.json().get('message'))
             except Exception as err:
-                xstr += f"Error.\n{url_dog}/{breed}/images/random.\nКод ={res1.get('statusCode')}.\n{str(err)}."
+                xstr += f"Error.\n{self.url_dog}/{breed}/{self.point}.\nКод ={res1.get('statusCode')}.\n{str(err)}."
 
         if xstr=="":
            return {'isSuccess': True, 'list':url_images,'error': ""}
@@ -126,9 +132,7 @@ class Dog:
 
 yandex_client = YaUploader()
 dog=Dog()
-
-def u(breed):
-      xstr1=""
+def u(breed,errors):
       res=yandex_client.lazy_delete_folder(folder)
       if res['isSuccess']:
           res1=dog.get_sub_breeds(breed)
@@ -140,22 +144,22 @@ def u(breed):
                   if len(urls)>0:
                       res3=yandex_client.create_folder(folder)
                       if res3['isSuccess']:
-                         for url in urls:
-                            part_name = url.split('/')
-                            name = '_'.join([part_name[-2], part_name[-1]])
-                            res4=yandex_client.upload_photos_to_yd(folder, url, name)
+                         for index,value in enumerate(urls,start=1):
+                            part_name = value.split('/')
+                            name = f"{part_name[-2]}_{str(index)}_{os.path.splitext(value)[1]}"
+                            res4=yandex_client.upload_photos_to_yd(folder, value, name)
                             if not res4['isSuccess']:
-                              xstr=res4['error']
+                              errors.append(res4['error'])
                               break
                   else:
-                      xstr1+=f"Error.\nДля породы {breed} не найдено ни одного изображения."
+                      errors.append(f"Для породы {breed} не найдено ни одного изображения.")
               else:
-                  xstr1+=f"Error.\nФормирование списка изображений. Порода {breed}.\nКод ={res.get('statusCode')}.\n{str(res['error'])}."
+                  errors.append(f"Error.\nФормирование списка изображений. Порода {breed}.\nКод ={str(res2.get('statusCode'))}.\n{str(res2['error'])}.")
           else:
-              xstr1 += f"Error.\nget_sub_breeds. Порода {breed}.\nКод ={res.get('statusCode')}.\n{str(res['error'])}."
+              errors.append(f"Error.\nget_sub_breeds. Порода {breed}.\nКод ={str(res1.get('statusCode'))}.\n{str(res1['error'])}.")
       else:
-          xstr1+=str(res['error'])
-      return xstr1
+          errors.append(res['error'])
+
 def checkResponse(response):
     result = {}
     result["isSuccess"] = response.ok
@@ -178,15 +182,35 @@ def checkResponse(response):
             result["error"] = response.reason
     return result
 
-class TestAPI():
-    @pytest.mark.parametrize('breed', ['doberman', random.choice(['bulldog', 'collie'])])
-    #@pytest.mark.parametrize('breed', allBreeds)
+def check_items(breed,get_sub_breeds,response,errors):
+    if len(get_sub_breeds) == 0:
+        try:
+           assert len(response['json']['_embedded']['items']) == 1
+        except AssertionError:
+           errors.append(f"Некорректное количество items.\nОР: 1\nФР: {len(response['json']['_embedded']['items'])}\n")
+    else:
+        try:
+            assert len(response['json']['_embedded']['items']) == len(get_sub_breeds)
+        except AssertionError:
+            errors.append(f"Некорректное количество items.\nОР: 1\nФР: {len(response['json']['_embedded']['items'])}\n")
+    for item in response['json']['_embedded']['items']:
+        try:
+            assert item['type'] == 'file'
+        except AssertionError:
+            errors.append(f"Некорректный тип item[{response['json']['_embedded']['items'].index(item)}].\nОР: file\nФР: {item['type']}\n")
+        try:
+            assert item['name'].startswith(breed)
+        except AssertionError:
+            errors.append(f"Некорректный name item[{response['json']['_embedded']['items'].index(item)}].\nОР: name начинается с {breed}\nФР: name={item['name']}\n")
+
+class TestAPI:
+    errors = []
+    @pytest.mark.parametrize('breed', dog.allBreeds)
     def test_proverka_upload_dog(self,breed):
-        xstr=""
-        res=u(breed)
-        if not res=="":
-            xstr+=f'{res}\n'
-        else:
+        self.errors=[]
+        # подготовка тестовых данных
+        u(breed,self.errors)
+        if not self.errors:
             # проверка
             xparams = {
                        "path": folder,
@@ -194,35 +218,18 @@ class TestAPI():
                       }
             response = yandex_client.get_resources(xparams)
             if response['isSuccess']:
-                if response['json']['type'] != "dir":
-                    xstr+=f"Некорректный тип.\nОР: dir\nФР: {response.json()['type']}\n"
-                if response['json']['name'] != folder:
-                    xstr += f"Некорректный name папки.\nОР: {folder}\nФР: {response.json()['name']}\n"
+                assert response['json']['type'] == "dir",f"Некорректный тип.\nОР: dir\nФР: {response['json']['type']}\n"
+                assert response['json']['name'] == folder,f"Некорректный name папки.\nОР: {folder}\nФР: {response['json']['name']}\n"
                 res1=dog.get_sub_breeds(breed)
                 if res1['isSuccess']:
-                    xget_sb=res1['json']['message']
-                    if xget_sb == []:
-                        if len(response['json']['_embedded']['items']) != 1:
-                            xstr += f"Некорректное количество items.\nОР: 1\nФР: {len(response['json']['_embedded']['items'])}\n"
-                        for item in response['json']['_embedded']['items']:
-                            if item['type'] != 'file':
-                               xstr += f"Некорректный тип item[{response['json']['_embedded']['items'].index(item)}].\nОР: file\nФР: {item['type']}\n"
-                            if not item['name'].startswith(breed):
-                                xstr += f"Некорректный name item[{response['json']['_embedded']['items'].index(item)}].\nОР: name начинается с {breed}\nФР: name={item['name']}\n"
-
-                    else:
-                        if len(response['json']['_embedded']['items']) != len(xget_sb):
-                            xstr += f"Некорректное количество items.\nОР: {len(xget_sb)}\nФР: {len(response['json']['_embedded']['items'])}\n"
-                        for item in response['json']['_embedded']['items']:
-                            if item['type'] != 'file':
-                               xstr += f"Некорректный тип item[{response['json']['_embedded']['items'].index(item)}].\nОР: file\nФР: {item['type']}\n"
-                            if not item['name'].startswith(breed):
-                                xstr += f"Некорректный name item[{response['json']['_embedded']['items'].index(item)}].\nОР: name начинается с {breed}\nФР: name={item['name']}\n"
+                    check_items(breed,res1['json']['message'],response,self.errors)
                 else:
-                    xstr += f"Ошибка получения данных породы {breed}\nПараметры:{str(xparams)}.\n{str(response['err'])}\n"
+                    self.errors.append(f"Ошибка получения данных породы {breed}\nПараметры:{str(xparams)}.\n{str(res1['error'])}\n")
             else:
-                xstr+= f"Ошибка получения данных ресурса\nПараметры:{str(xparams)}.\n{str(response['err'])}\n"
-
-        yandex_client.lazy_delete_folder(folder)
-
-        assert xstr=="", xstr
+                self.errors.append(f"Ошибка получения данных ресурса\nПараметры:{str(xparams)}.\n{str(response['error'])}\n")
+        # удаление тестовых данных
+        res = yandex_client.lazy_delete_folder(folder)
+        if not res['isSuccess']:
+           self.errors.append(f"Ошибка ленивого удаления тестовых данных породы {breed}\n{str(res['error'])}\n")
+        if self.errors:
+            pytest.fail("\n" + "\n".join(self.errors))
